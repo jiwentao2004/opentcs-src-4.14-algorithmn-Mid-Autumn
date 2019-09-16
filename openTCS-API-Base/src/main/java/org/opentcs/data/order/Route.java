@@ -1,6 +1,6 @@
 /**
  * Copyright (c) The openTCS Authors.
- *
+ * <p>
  * This program is free software and subject to the MIT license. (For details,
  * see the licensing information (LICENSE.txt) you should have received with
  * this copy of the software.)
@@ -12,13 +12,18 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+
 import static java.util.Objects.requireNonNull;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
+
 import org.opentcs.data.model.Path;
 import org.opentcs.data.model.Point;
 import org.opentcs.data.model.Vehicle;
+
 import static org.opentcs.util.Assertions.checkArgument;
+
 import org.opentcs.util.annotations.ScheduledApiChange;
 
 /**
@@ -28,7 +33,7 @@ import org.opentcs.util.annotations.ScheduledApiChange;
  * @author Stefan Walter (Fraunhofer IML)
  */
 public class Route
-    implements Serializable {
+        implements Serializable {
 
   /**
    * The sequence of steps this route consists of, in the order they are to be processed.
@@ -91,7 +96,7 @@ public class Route
     }
     final Route other = (Route) o;
     return costs == other.costs
-        && Objects.equals(steps, other.steps);
+            && Objects.equals(steps, other.steps);
   }
 
   @Override
@@ -108,7 +113,7 @@ public class Route
    * A single step in a route.
    */
   public static class Step
-      implements Serializable {
+          implements Serializable {
 
     /**
      * The path to travel.
@@ -134,6 +139,7 @@ public class Route
      * Whether execution of this step is allowed.
      */
 //    private final boolean executionAllowed;
+    private static final long serialVersionUID = -234943312432874820L;
     private boolean executionAllowed;
 
     synchronized public void setExecutionAllowed(boolean executionAllowed) {
@@ -266,10 +272,10 @@ public class Route
       }
       Step other = (Step) o;
       return Objects.equals(path, other.path)
-          && Objects.equals(sourcePoint, other.sourcePoint)
-          && Objects.equals(destinationPoint, other.destinationPoint)
-          && Objects.equals(vehicleOrientation, other.vehicleOrientation)
-          && routeIndex == other.routeIndex;
+              && Objects.equals(sourcePoint, other.sourcePoint)
+              && Objects.equals(destinationPoint, other.destinationPoint)
+              && Objects.equals(vehicleOrientation, other.vehicleOrientation)
+              && routeIndex == other.routeIndex;
     }
 
     @Override
