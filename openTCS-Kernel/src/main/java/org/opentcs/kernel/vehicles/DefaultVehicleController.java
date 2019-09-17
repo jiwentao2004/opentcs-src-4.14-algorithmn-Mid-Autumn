@@ -407,19 +407,13 @@ public class DefaultVehicleController
           map.put(nextStep.getDestinationPoint().getName(), list);
         }
         // 重新规划路径
-        synchronized (commAdapter) {
-          // 注意：改变拓扑图后为了防止其他线程恢复拓扑图（比如那个3s后自动恢复拓扑图的线程），导致总是找不到路径
-          changeTopology(nextStep);
-          rerouteUtil.reroute(vehicleService.fetchObject(Vehicle.class, vehicle.getReference()));
-        }
-        log(nextStep.getPath().getName() + " 判断为不可用，变更拓扑图，重新规划路径");
-        failedTimes = 0;
+        uninterruptibleReroute(nextStep);
         // 5 秒后自动恢复拓扑图（容错）
         // 有一种情况会导致修改的拓扑无法改回来（例如请求到 100 次的时候，占用该点的小车已经走了，此时没有条件可以触发拓扑图的恢复）
         new Thread(() -> {
           Uninterruptibles.sleepUninterruptibly(5000, TimeUnit.MILLISECONDS);
           recoveryTopology(nextStep.getDestinationPoint().getName());
-          log("3 秒后恢复由 " + nextStep.getDestinationPoint().getName() + " 引起的拓扑图改变");
+          log("5 秒后恢复由 " + nextStep.getDestinationPoint().getName() + " 引起的拓扑图改变");
         }).start();
       }
     } else {
@@ -434,6 +428,14 @@ public class DefaultVehicleController
         failedTimes = 0;
       }
     }
+  }
+
+  private void uninterruptibleReroute(Step nextStep) {
+    // 注意：改变拓扑图后为了防止其他线程恢复拓扑图（比如那个3s后自动恢复拓扑图的线程），导致总是找不到路径
+    changeTopology(nextStep);
+    rerouteUtil.reroute(vehicleService.fetchObject(Vehicle.class, vehicle.getReference()));
+    failedTimes = 0;
+    log(nextStep.getPath().getName() + " 判断为不可用，变更拓扑图，重新规划路径");
   }
 
   private void unLockLastStep(Step s) {

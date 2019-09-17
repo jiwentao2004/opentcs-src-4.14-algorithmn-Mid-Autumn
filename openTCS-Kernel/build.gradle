@@ -46,3 +46,6 @@ run {
                     'opentcs.home':'.'])
   jvmArgs('-XX:-OmitStackTraceInFastThrow')
 }
+tasks.withType(JavaCompile) {
+  options.encoding = "UTF-8"
+}
