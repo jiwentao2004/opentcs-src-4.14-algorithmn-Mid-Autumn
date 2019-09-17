@@ -14,7 +14,6 @@ import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.*;
 
-import static java.util.Objects.isNull;
 import static java.util.Objects.requireNonNull;
 
 import java.util.concurrent.TimeUnit;
@@ -57,7 +56,6 @@ import org.opentcs.kernel.services.StandardPlantModelService;
 import org.opentcs.kernel.workingset.Model;
 import org.opentcs.kernel.workingset.TCSObjectPool;
 import org.opentcs.strategies.basic.dispatching.RerouteUtil;
-import org.opentcs.strategies.basic.dispatching.TransportOrderUtil;
 import org.opentcs.strategies.basic.routing.PointRouter;
 import org.opentcs.strategies.basic.routing.jgrapht.ModelEdge;
 import org.opentcs.strategies.basic.routing.jgrapht.ModelGraphMapper;
@@ -169,16 +167,17 @@ public class DefaultVehicleController
   @Inject
   private RouterService routerService;
   @Inject
-  private TransportOrderUtil transportOrderUtil;
-  @Inject
   private TransportOrderService transportOrderService;
   @Inject
   private RerouteUtil rerouteUtil;
+
   private Thread checkVehicleStateThread;
-  private int tryLockFailCount = 0;
+  private int failedTimes = 0;
   private boolean isCleared = false;
+
   private Graph<String, ModelEdge> graph;
   private Set<Path> paths;
+  private Set<Point> points;
 
   synchronized public void setCleared(boolean cleared) {
     isCleared = cleared;
@@ -262,171 +261,143 @@ public class DefaultVehicleController
     initialized = true;
   }
 
+  /**
+   * futureCommands.peek() 获取 nestStep 不严谨，因为将来一条命令包含多步，
+   * 由于命令将会被改造，这里尽量不要依赖命令获取信息，
+   * 正确的做法是用小车当前位置往后推算。
+   * （commAdapter 的命令队列容量从 2 改为 1）
+   */
   private void initVehicleStateListener() {
-    // 0910 start
-    StandardPlantModelService plantModelService = (StandardPlantModelService) this.plantModelService;
+    // 获得 model 并用 jGrapht 最短路径（暂时不用）
+//    testGetModelAndGetShortestPathRouter();
 
-    // get whole model in kernel
-//    Model model = plantModelService.getModel();
-//    Pattern compile = Pattern.compile(".*");
-//    paths = model.getPaths(compile);
-//    Set<Point> points = model.getPoints(compile);
-
-    //get jGrapht shortestPath router
-//    graph = mapper.translateModel(points, paths, vehicle);
-//    PointRouter router = new ShortestPathPointRouter(new DijkstraShortestPath<>(graph), points);
-
-//    Point pre = null;
-//    for (Point point : points) {
-//      if (pre != null) {
-//        List<Step> routeSteps = router.getRouteSteps(pre, point);
-//        StringBuilder sb = new StringBuilder();
-//        for (Step step : routeSteps) {
-//          sb.append(step.getSourcePoint().getName() + " -> " + step.getDestinationPoint().getName() + ", ");
-//        }
-//        LOG.warn(sb.toString());
-//      }
-//      LOG.warn(point.getName());
-//      pre = point;
-//    }
-
-//    for (Path path : paths) {
-//      LOG.warn(path.getName());
-//    }
-
-//    AtomicBoolean flag = new AtomicBoolean(true);
+    // 获得 sharedMap（暂时不用）
 //    Map<String, String> sharedMap = objectPool.getSharedMap();
     checkVehicleStateThread = new Thread(() -> {
       while (true) {
-        // update sharedMap
-//        VehicleProcessModel processModel = commAdapter.getProcessModel();
-//        String name = processModel.getVehicle().getName();
-//        String position = processModel.getVehiclePosition();
-//        LOG.warn(name + "[" + position + "]");
-//        for (String s : sharedMap.keySet()) {
-//          LOG.warn("<" + s + ", " + sharedMap.get(s) + ">");
-//        }
+        // 实时遍历 sharedMap（暂时不用）
+//        printSharedMap(sharedMap);
 
-        // check next path and try lock nextStep, if curStep is final step, do nothing.
+        // 尝试请求下一步的锁，如果当前是最后以后，则什么也不做
         if (currentDriveOrder != null) {
           // 请求下一步的锁
           if (futureCommands.size() > 0) {
             Step nextStep = futureCommands.peek().getStep();
             lockNextStep(nextStep);
           }
-
           // 释放上一步的锁
           ArrayList<MovementCommand> lastCommandSent = new ArrayList<>(commandsSent);
           List<Step> allSteps = currentDriveOrder.getRoute().getSteps();
           if (lastCommandSent.size() == 1 && lastCommandSent.get(0).getStep().getRouteIndex() > 0) {
             Step lastStep = allSteps.get(lastCommandSent.get(0).getStep().getRouteIndex() - 1);
-            unLockStep(lastStep);
+            unLockLastStep(lastStep);
           } else if (lastCommandSent.size() == 0) {
-            // 等待资源暂停中，lastCommandSent已被执行，但是futureCommands还有未执行的
-//            LOG.warn("lastCommandSent size is zero, futureCommands size is " + futureCommands.size());
+            // 小车暂停中，这时 lastCommandSent 已被执行，而 futureCommands 还有未执行的
+//            log("LastCommandSent size is zero, futureCommands size is " + futureCommands.size());
           }
-
-//          LOG.warn("All we know is : "
-//                  + vehicle.getName() + ", "
-//                  + currentDriveOrder.toString() + ", "
-//                  + commandsSent.size() + ", "
-//                  + futureCommands.size());
-//          StringBuilder sb = new StringBuilder();
-//          List<Step> steps = currentDriveOrder.getRoute().getSteps();
-//          for (Step step : steps) {
-//            sb.append(step.getPath().getSourcePoint().getName() + "->" + step.getPath().getDestinationPoint().getName());
-//            sb.append(", ");
-//          }
-//          LOG.warn(sb.toString());
-          // if necessary:
-          // update driveOrder
-//      updateDriveOrder(null, null);
-          // sentCommand
-
-//          if (flag.get()) {
-
-          //detect conflict and 1.abort 2.reroute
-//            Uninterruptibles.sleepUninterruptibly(5000, TimeUnit.MILLISECONDS);
-//            Path nextPath = futureCommands.peek().getStep().getPath();
-//            TCSResourceReference<Path> nextPathRef = nextPath.getReference();
-
-
-//          LOG.warn("Abort now, nextPath to be locked is : " + nextPath.getName());
-//          dispatcherService.withdrawByVehicle(vehicle.getReference(), true, false);
-
-//            LOG.warn("Pause now, from point : " + nextPath.getSourcePoint().getName());
-//            futureCommands.peek().getStep().setExecutionAllowed(false);
-
-//            Uninterruptibles.sleepUninterruptibly(15000, TimeUnit.MILLISECONDS);
-//            LOG.warn("LockPath now, from point : " + nextPath.getSourcePoint().getName());
-//            routerService.updatePathLock(nextPathRef, true);
-//            Uninterruptibles.sleepUninterruptibly(5000, TimeUnit.MILLISECONDS);
-//            LOG.warn("UnLockPath now, from point : " + nextPath.getSourcePoint().getName());
-//            routerService.updatePathLock(nextPathRef, false);
-//            flag.set(false);
-//          }
-
-
-//      sendCommAdapterCommand(null);
-          // abort order
-//          Uninterruptibles.sleepUninterruptibly(3000, TimeUnit.MILLISECONDS);
-//          abortDriveOrder();
-//          sendCommAdapterCommand();  // xxxCommand.execute is changing processModel directly，not good.
         } else {
-          // 起点与终点相同的transportOrder（压根进不来，直接成功）
-          if (commAdapter.getProcessModel().getVehicle().getTransportOrder() != null) {
-            LOG.warn("Although curOrder is null, but transportOrder is : " + commAdapter.getProcessModel().getVehicle().getTransportOrder().getName());
-          }
+          // 注意：对于起点与终点相同的 transportOrder，压根进不来，直接成功，并不会进入这个分支。
+//          if (commAdapter.getProcessModel().getVehicle().getTransportOrder() != null) {
+//            log("Although currentDriveOrder is null, but transportOrder is " + commAdapter.getProcessModel().getVehicle().getTransportOrder().getName());
+//          }
+
+          // 小车已执行完 currentDriveOrder 或者正在初始化小车位置
           if (!isCleared && commAdapter.getProcessModel().getVehiclePosition() != null) {
             //curOrder 已全部执行完，清理最后一步的锁
-            LOG.warn("ClearLocks when curOrder is null.");
+            log("ClearLocks when currentDriveOrder is null.");
             clearLocksExcept(commAdapter.getProcessModel().getVehiclePosition());
             setCleared(true);
 
-            // 如果是第一次设置小车初始位置，则这个位置强制加锁（即便这个地方有别的车正在请求或者已请求到了锁）
-            LOG.warn("Lock curPosition when curOrder is null anyway.");
+            // 如果是初始化小车位置，则这个位置强制加锁（即便这个地方有别的车正在请求或者已请求到了锁）
+            log("小车初始化，强制锁定 " + commAdapter.getProcessModel().getVehiclePosition());
             objectPool.getSharedLockInformation().put(commAdapter.getProcessModel().getVehiclePosition(), vehicle.getName());
           }
         }
         Uninterruptibles.sleepUninterruptibly(500, TimeUnit.MILLISECONDS);
       }
-    }, "BDKELoopThread-" + vehicle.getName());
+    }, "BDKEController-" + vehicle.getName());
     checkVehicleStateThread.start();
-    // 0910 end
   }
 
-  private void unLockStep(Step s) {
-    String sourcePointName = s.getSourcePoint().getName();
-    // 如果小车是原路返回，则不能解锁这一步，
-    // 换句话说，要解锁的不能是接下来的两步（接下来的2步必须保持锁定）
-    if (futureCommands.peek() != null &&
-            (futureCommands.peek().getStep().getSourcePoint().getName().equals(sourcePointName) ||
-                    futureCommands.peek().getStep().getDestinationPoint().getName().equals(sourcePointName))) {
-      LOG.warn("Go back way, so not unlock " + sourcePointName + " which it will pass in two future steps.");
-      return;
+  // 日志包装成 notification
+  private void log(String s) {
+    LOG.warn(s);
+    notificationService.publishUserNotification(
+            new UserNotification("BDKEController-" + vehicle.getName(), s, UserNotification.Level.INFORMATIONAL));
+  }
+
+  // 测试用
+  private void testGetModelAndGetShortestPathRouter() {
+    // 获得 model
+    StandardPlantModelService plantModelService = (StandardPlantModelService) this.plantModelService;
+    Model model = plantModelService.getModel();
+    Pattern compile = Pattern.compile(".*");
+    paths = model.getPaths(compile);
+    points = model.getPoints(compile);
+
+    // 获得 jGrapht shortestPath router
+    graph = mapper.translateModel(points, paths, vehicle);
+    PointRouter router = new ShortestPathPointRouter(new DijkstraShortestPath<>(graph), points);
+
+    // 遍历每个点，并用获得的 router 计算出前一个点到当前点的最短路径
+    Point pre = null;
+    for (Point point : points) {
+      if (pre != null) {
+        List<Step> routeSteps = router.getRouteSteps(pre, point);
+        StringBuilder sb = new StringBuilder();
+        for (Step step : routeSteps) {
+          sb.append(step.getSourcePoint().getName() + " -> " + step.getDestinationPoint().getName() + ", ");
+        }
+        LOG.warn(sb.toString());
+      }
+      LOG.warn(point.getName());
+      pre = point;
     }
 
-    if (objectPool.getSharedLockInformation().containsKey(sourcePointName)
-            && objectPool.getSharedLockInformation().get(sourcePointName).equals(vehicle.getName())) {
-      objectPool.getSharedLockInformation().remove(sourcePointName);
-      LOG.warn("Remove point lock : " + sourcePointName);
+    // 遍历每条边
+    for (Path path : paths) {
+      LOG.warn(path.getName());
+    }
+  }
+
+  // 测试用
+  private void printSharedMap(Map<String, String> sharedMap) {
+    for (Map.Entry<String, String> entry : sharedMap.entrySet()) {
+      LOG.warn("<" + entry.getKey() + ", " + entry.getValue() + ">");
+    }
+  }
+
+  private boolean tryLockingStep(Step s) {
+    String pointToBeLocked = s.getDestinationPoint().getName();
+    // 该点已有锁定且不是自己，请求失败
+    if (objectPool.getSharedLockInformation().containsKey(pointToBeLocked)
+            && !objectPool.getSharedLockInformation().get(pointToBeLocked).equals(vehicle.getName())) {
+      log(s.getDestinationPoint().getName() + " 已被 "
+              + objectPool.getSharedLockInformation().get(pointToBeLocked) + " 锁定，锁定失败");
+      return false;
+    } else {
+      // 请求成功，锁定该点
+      objectPool.getSharedLockInformation().put(pointToBeLocked, vehicle.getName());
+      log("锁定 " + s.getDestinationPoint().getName() + " 成功");
+      return true;
     }
   }
 
   private void lockNextStep(Step nextStep) {
-    LOG.warn("Try to lock point : " + nextStep.getPath().getDestinationPoint().getName());
-    if (!tryLockStep(nextStep)) {
-
+    log("尝试锁定 " + nextStep.getPath().getDestinationPoint().getName() + "...");
+    if (!tryLockingStep(nextStep)) {
+      // 锁定失败，暂停下一步的执行
+      // （将来一步可能包含多个点，所以这里要改成让小车停在下一个点）
       if (nextStep.isExecutionAllowed()) {
-        nextStep.setExecutionAllowed(false);  // pause 不合适，当前命令必须立即停止，发一个命令让小车立即停止。
+        nextStep.setExecutionAllowed(false);
       }
-//            abortDriveOrder();
-
-      tryLockFailCount++;
-      LOG.warn("Lock fail for point " + nextStep.getPath().getDestinationPoint().getName() + " in [" + tryLockFailCount + "] times.");
-      if (tryLockFailCount >= 100) {
-        //100次失败后重新规划路径
-        //为了将来能够手动/自动恢复拓扑图做准备
+      // 尝试失败次数统计
+      // （将在要在 reroute 的时候加入清零的逻辑才更加严谨）
+      failedTimes++;
+      log("第 [" + failedTimes + "] 次尝试锁定 " + nextStep.getPath().getDestinationPoint().getName() + " 失败");
+      if (failedTimes >= 100) {
+        // 100 次失败后，更改拓扑图，并重新规划路径
+        // 保存更改的拓扑图信息，以便将来能手动/自动恢复
         Map<String, List<TCSObjectReference<Path>>> map = objectPool.getSharedTopologyInformation();
         if (map.get(nextStep.getDestinationPoint().getName()) != null) {
           map.get(nextStep.getDestinationPoint().getName()).add(nextStep.getPath().getReference());
@@ -435,40 +406,50 @@ public class DefaultVehicleController
           list.add(nextStep.getPath().getReference());
           map.put(nextStep.getDestinationPoint().getName(), list);
         }
-        reRoute(nextStep);
-        LOG.warn("Already tried " + tryLockFailCount + " times, reroute for current vehicle because path " + nextStep.getPath().getName() + " is disabled.");
-        tryLockFailCount = 0;
-
-        // 容错
-        // 有一种情况会导致修改的拓扑无法改回来（即快请求100次的时候，占用该点的小车走了，等到了100次，会改变该点拓扑，由于小车已经走了，因此没有谁能触发该点的恢复）
+        // 重新规划路径
+        synchronized (commAdapter) {
+          // 注意：改变拓扑图后为了防止其他线程恢复拓扑图（比如那个3s后自动恢复拓扑图的线程），导致总是找不到路径
+          changeTopology(nextStep);
+          rerouteUtil.reroute(vehicleService.fetchObject(Vehicle.class, vehicle.getReference()));
+        }
+        log(nextStep.getPath().getName() + " 判断为不可用，变更拓扑图，重新规划路径");
+        failedTimes = 0;
+        // 5 秒后自动恢复拓扑图（容错）
+        // 有一种情况会导致修改的拓扑无法改回来（例如请求到 100 次的时候，占用该点的小车已经走了，此时没有条件可以触发拓扑图的恢复）
         new Thread(() -> {
-          Uninterruptibles.sleepUninterruptibly(3000, TimeUnit.MILLISECONDS);
+          Uninterruptibles.sleepUninterruptibly(5000, TimeUnit.MILLISECONDS);
           recoveryTopology(nextStep.getDestinationPoint().getName());
-          LOG.warn("3s later we recoveryTopology change from point " + nextStep.getDestinationPoint().getName() + " anyway.");
+          log("3 秒后恢复由 " + nextStep.getDestinationPoint().getName() + " 引起的拓扑图改变");
         }).start();
-
-
       }
     } else {
       if (!nextStep.isExecutionAllowed()) {
-        // 未到达100失败但是之前暂停过，因此通过重新规划恢复任务，根据上次暂停的点和目的地，重新生成TransportOrder
-        // 将第一个DriveOrder改为新的，其他的DriveOrder不变
-//        reOrder();
+        //
+        failedTimes++;
+        log("第 [" + failedTimes + "] 次尝试锁定 " + nextStep.getPath().getDestinationPoint().getName()
+                + " 成功，重启路径规划...");
+        // 重新获得资源，重启路径规划
+//        reOrder();  // 另一种思路：取重新发订单（已过时）
         rerouteUtil.reroute(vehicleService.fetchObject(Vehicle.class, vehicle.getReference()));
-
-
-//              rerouteUtil.reroute(vehicleService.fetchObject(Vehicle.class, vehicle.getReference()));
-//              nextStep.setExecutionAllowed(true);
-        LOG.warn("Already tried " + tryLockFailCount + " times, recovery for all vehicles because path " + nextStep.getPath().getName() + " is available again.");
-        tryLockFailCount = 0;
+        failedTimes = 0;
       }
     }
   }
 
-  synchronized private void reRoute(Step nextStep) {
-    //中间不能被打断，否则可能会有别的线程改拓扑，比如那个3s后自动恢复的线程，导致总是找不到路径
-    changeTopology(nextStep);
-    rerouteUtil.reroute(vehicleService.fetchObject(Vehicle.class, vehicle.getReference()));
+  private void unLockLastStep(Step s) {
+    String sourcePointName = s.getSourcePoint().getName();
+    // 如果小车折返，要保证接下来的两步保持锁定
+    if (futureCommands.peek() != null &&
+            (futureCommands.peek().getStep().getSourcePoint().getName().equals(sourcePointName) ||
+                    futureCommands.peek().getStep().getDestinationPoint().getName().equals(sourcePointName))) {
+      log("小车折返，原计划解除锁定的 " + sourcePointName + " 保持锁定");
+      return;
+    }
+    if (objectPool.getSharedLockInformation().containsKey(sourcePointName)
+            && objectPool.getSharedLockInformation().get(sourcePointName).equals(vehicle.getName())) {
+      objectPool.getSharedLockInformation().remove(sourcePointName);
+      log("小车前进，解除锁定 " + sourcePointName);
+    }
   }
 
   private void changeTopology(Step nextStep) {
@@ -484,7 +465,7 @@ public class DefaultVehicleController
   }
 
   private void reOrder() {
-    LOG.warn("ReOrdering, curPosition is " + commAdapter.getProcessModel().getVehiclePosition());
+    log("重新下订单，当前位置为 " + commAdapter.getProcessModel().getVehiclePosition());
     List<DestinationCreationTO> destinations = new LinkedList<>();
     destinations.add(new DestinationCreationTO(currentDriveOrder.getRoute().getFinalDestinationPoint().getName(),
             DriveOrder.Destination.OP_MOVE));
@@ -494,8 +475,8 @@ public class DefaultVehicleController
             .withIntendedVehicleName(vehicle.getName());
     TransportOrder dummyOrder = transportOrderService.createTransportOrder(orderTO);
     dispatcherService.dispatch();
-    LOG.warn("NewOrder to dispatch is " + dummyOrder.toString());
-    LOG.warn("CurOrder to withdraw is " + currentDriveOrder.getTransportOrder().toString());
+    log("派发新订单 " + dummyOrder.toString());
+    log("撤销旧订单 " + currentDriveOrder.getTransportOrder().toString());
     dispatcherService.withdrawByTransportOrder(currentDriveOrder.getTransportOrder(), true);
   }
 
@@ -506,20 +487,6 @@ public class DefaultVehicleController
               !pointName.equals(entry.getKey())) {
         map.remove(entry.getKey());
       }
-    }
-  }
-
-  private boolean tryLockStep(Step s) {
-    String pointToBeLocked = s.getDestinationPoint().getName();
-    // 请求锁失败
-    if (objectPool.getSharedLockInformation().containsKey(pointToBeLocked)
-            && !objectPool.getSharedLockInformation().get(pointToBeLocked).equals(vehicle.getName())) {
-      return false;
-    } else {
-      // 请求锁成功
-      objectPool.getSharedLockInformation().put(pointToBeLocked, vehicle.getName());
-      LOG.warn("Lock success for point " + s.getDestinationPoint().getName());
-      return true;
     }
   }
 
@@ -611,31 +578,36 @@ public class DefaultVehicleController
               Vehicle.ROUTE_INDEX_DEFAULT);
       createFutureCommands(newOrder, orderProperties);
 
-      // Modify start
+      // 2019 start
       ArrayList<MovementCommand> fCommands = new ArrayList<>(futureCommands);
       String sourcePoint = fCommands.get(0).getStep().getSourcePoint().getName();
       // 恢复拓扑图
       recoveryTopology(sourcePoint);
-      // Clear locks in the vehicle's last driveOrder except the startPoint(the last driveOrder's endPoint).
+      // 除了起点，解除其他点的锁
       clearLocksExcept(sourcePoint);
-      LOG.warn("ClearLocks when start.");
+      log("启动前清理其他点的锁");
       setCleared(false);
       if (fCommands.size() > 1) {
-        // Try to lock curStep and nextStep when begin a driveOrder.
-        if (!tryLockStep(fCommands.get(0).getStep())) {
+        // 启动前锁定第 1、2 个点（路径大于 1 步）
+        if (!tryLockingStep(fCommands.get(0).getStep())) {
           fCommands.get(0).getStep().setExecutionAllowed(false);
-        } else if (!tryLockStep(fCommands.get(1).getStep())) {
+          log("锁定第 1 个点失败");
+        } else if (!tryLockingStep(fCommands.get(1).getStep())) {
           fCommands.get(1).getStep().setExecutionAllowed(false);
+          log("锁定第 1 个点成功，第 2 个点失败");
         } else {
-          LOG.warn("lock 1,2st point success.");
+          log("锁定第 1、2 个点成功");
         }
       } else if (fCommands.size() == 1) {
-        if (!tryLockStep(fCommands.get(0).getStep())) {
+        // 启动前锁定第 1 个点（路径只有 1 步）
+        if (!tryLockingStep(fCommands.get(0).getStep())) {
           fCommands.get(0).getStep().setExecutionAllowed(false);
+          log("锁定第 1 个点失败");
+        } else {
+          log("锁定第 1 个点成功");
         }
       }
-      // Modify end
-
+      // 2019 end
 
       if (canSendNextCommand()) {
         allocateForNextCommand();
@@ -694,31 +666,36 @@ public class DefaultVehicleController
               updatedVehicle.getRouteProgressIndex());
 
 
-      // Modify start
+      // 2019 start
       ArrayList<MovementCommand> fCommands = new ArrayList<>(futureCommands);
       String sourcePoint = fCommands.get(0).getStep().getSourcePoint().getName();
       // 恢复拓扑图
       recoveryTopology(sourcePoint);
-      // Clear locks in the vehicle's last driveOrder except the startPoint(the last driveOrder's endPoint).
+      // 除了起点，解除其他点的锁
       clearLocksExcept(sourcePoint);
-      LOG.warn("ClearLocks when restart after reroute.");
+      log("已重新规划路径，启动前清理其他点的锁");
       setCleared(false);
       if (fCommands.size() > 1) {
-        // Try to lock curStep and nextStep when begin a driveOrder.
-        if (!tryLockStep(fCommands.get(0).getStep())) {
+        // 启动前锁定第 1、2 个点（路径大于 1 步）
+        if (!tryLockingStep(fCommands.get(0).getStep())) {
           fCommands.get(0).getStep().setExecutionAllowed(false);
-        } else if (!tryLockStep(fCommands.get(1).getStep())) {
+          log("锁定第 1 个点失败");
+        } else if (!tryLockingStep(fCommands.get(1).getStep())) {
           fCommands.get(1).getStep().setExecutionAllowed(false);
+          log("锁定第 1 个点成功，第 2 个点失败");
         } else {
-          LOG.warn("lock 1,2st point success.");
+          log("锁定第 1、2 个点成功");
         }
       } else if (fCommands.size() == 1) {
-        if (!tryLockStep(fCommands.get(0).getStep())) {
+        // 启动前锁定第 1 个点（路径只有 1 步）
+        if (!tryLockingStep(fCommands.get(0).getStep())) {
           fCommands.get(0).getStep().setExecutionAllowed(false);
+          log("锁定第 1 个点失败");
+        } else {
+          log("锁定第 1 个点成功");
         }
       }
-      // Modify end
-
+      // 2019 end
 
       // The vehilce may now process previously restricted steps
       if (updatedVehicle.getState() == Vehicle.State.IDLE
@@ -765,7 +742,7 @@ public class DefaultVehicleController
         // There are no commands to be dicarded
         return;
       } else {
-        // No commands in the 'sent queue', but the vehicle already executed some commands 
+        // No commands in the 'sent queue', but the vehicle already executed some commands
         lastCommandSent = lastCommandExecuted;
       }
     } else {
@@ -904,7 +881,7 @@ public class DefaultVehicleController
         waitingForAllocation = false;
         pendingResources = null;
         // In case the contoller's vehicle got rerouted while waiting for resource allocation
-        // the pending command is reset and therefore the associated allocation will be ignored. 
+        // the pending command is reset and therefore the associated allocation will be ignored.
         // Since there's now a new/updated route we need to trigger the next allocation. Otherwise
         // the vehicle would wait forever to get the next command.
         if (canSendNextCommand()) {
@@ -1010,12 +987,9 @@ public class DefaultVehicleController
   }
 
   private void updateVehiclePosition(String position) {
-
-
-    // update sharedMap
-    Map<String, String> sharedMap = objectPool.getSharedMap();
-    sharedMap.put(vehicle.getName(), position);
-
+    // 更新 sharedMap（暂时不用）
+//    Map<String, String> sharedMap = objectPool.getSharedMap();
+//    sharedMap.put(vehicle.getName(), position);
 
     // Get an up-to-date copy of the vehicle
     Vehicle currVehicle = vehicleService.fetchObject(Vehicle.class, vehicle.getReference());
@@ -1039,7 +1013,7 @@ public class DefaultVehicleController
       point = null;
     } else {
       point = vehicleService.fetchObject(Point.class, position);
-      // If the new position is not in the model, ignore it. (Some vehicles/drivers send 
+      // If the new position is not in the model, ignore it. (Some vehicles/drivers send
       // intermediate positions that cannot be order destinations and thus do not exist in
       // the model.
       if (point == null) {
